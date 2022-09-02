@@ -1,4 +1,4 @@
-import 'dart:collection';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,7 +7,7 @@ import 'package:uuid/uuid.dart';
 void main() {
   runApp(
     ChangeNotifierProvider(
-      create: (_) => BreadCrumbProvider(),
+      create: (_) => ObjectsProvider(),
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'Flutter',
@@ -15,57 +15,73 @@ void main() {
           primarySwatch: Colors.blue,
         ),
         home: const HomePage(),
-        routes: {
-          '/new': (context) => const NewBreadCrumbWidget(),
-        },
       ),
     ),
   );
 }
 
-class BreadCrumb {
-  bool isActive;
-  final String uuid;
-  final String name;
+@immutable
+class BaseObject {
+  final String id;
+  final String lastUpdated;
 
-  BreadCrumb({
-    required this.isActive,
-    required this.name,
-  }) : uuid = const Uuid().v4();
-
-  void activate() {
-    isActive = true;
-  }
-
-  // @override
-  // bool operator ==(covariant BreadCrumb other) =>
-  //     isActive == other.isActive && name == other.name;
+  BaseObject()
+      : id = const Uuid().v4(),
+        lastUpdated = DateTime.now().toIso8601String();
 
   @override
-  bool operator ==(covariant BreadCrumb other) => uuid == other.uuid;
+  bool operator ==(covariant BaseObject other) => id == other.id;
 
   @override
-  int get hashCode => uuid.hashCode;
-
-  String get title => name + (isActive ? ' > ' : '');
+  int get hashCode => id.hashCode;
 }
 
-class BreadCrumbProvider extends ChangeNotifier {
-  final List<BreadCrumb> _items = [];
+@immutable
+class ExpensiveObject extends BaseObject {}
 
-  UnmodifiableListView<BreadCrumb> get items => UnmodifiableListView(_items);
+@immutable
+class CheapObject extends BaseObject {}
 
-  void add(BreadCrumb breadCrumb) {
-    for (final item in _items) {
-      item.activate();
-    }
-    _items.add(breadCrumb);
-    notifyListeners();
+class ObjectsProvider extends ChangeNotifier {
+  late String id;
+  late CheapObject _cheapObject;
+  late StreamSubscription _cheapObjectStreamSubs;
+  late ExpensiveObject _expensiveObject;
+  late StreamSubscription _expensiveObjectStreamSubs;
+
+  ObjectsProvider()
+      : id = const Uuid().v4(),
+        _cheapObject = CheapObject(),
+        _expensiveObject = ExpensiveObject() {
+    start();
   }
 
-  void reset() {
-    _items.clear();
-    notifyListeners();
+  // To create new UUID every time
+  @override
+  void notifyListeners() {
+    id = const Uuid().v4();
+    super.notifyListeners();
+  }
+
+  CheapObject get cheapObject => _cheapObject;
+  ExpensiveObject get expensiveObject => _expensiveObject;
+
+  void start() {
+    _cheapObjectStreamSubs =
+        Stream.periodic(const Duration(seconds: 1)).listen((_) {
+      _cheapObject = CheapObject();
+      notifyListeners();
+    });
+    _expensiveObjectStreamSubs =
+        Stream.periodic(const Duration(seconds: 8)).listen((_) {
+      _expensiveObject = ExpensiveObject();
+      notifyListeners();
+    });
+  }
+
+  void stop() {
+    _cheapObjectStreamSubs.cancel();
+    _expensiveObjectStreamSubs.cancel();
   }
 }
 
@@ -81,122 +97,83 @@ class HomePage extends StatelessWidget {
       ),
       body: Column(
         children: [
-          Consumer<BreadCrumbProvider>(
-            builder: ((context, value, child) {
-              return BreadCrumbsWidget(
-                breadCrumbs: value.items,
-              );
-            }),
+          Row(
+            children: const [
+              Expanded(child: CheapWidget()),
+              Expanded(child: ExpensiveWidget())
+            ],
           ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pushNamed('/new');
-            },
-            child: const Text('Add new bread crumb'),
-          ),
-          TextButton(
-            onPressed: () {
-              context.read<BreadCrumbProvider>().reset();
-            },
-            child: const Text('Reset'),
-          ),
+          Row(
+            children: const [
+              Expanded(child: ObjectProviderWidget()),
+            ],
+          )
         ],
       ),
     );
   }
 }
 
-class BreadCrumbsWidget extends StatelessWidget {
-  final UnmodifiableListView<BreadCrumb> breadCrumbs;
-  const BreadCrumbsWidget({
-    Key? key,
-    required this.breadCrumbs,
-  }) : super(key: key);
+class CheapWidget extends StatelessWidget {
+  const CheapWidget({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    final cheapWidget = context.select<ObjectsProvider, CheapObject>(
+      (provider) => provider.cheapObject,
+    );
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
-      child: Wrap(
-        children: breadCrumbs.map((breadCrumb) {
-          return Text(
-            breadCrumb.title,
-            style: TextStyle(
-              color: breadCrumb.isActive ? Colors.blue : Colors.black,
-            ),
-          );
-        }).toList(),
+      height: 100,
+      color: Colors.purple.shade300,
+      child: Column(
+        children: [
+          const Text('Cheap Widget'),
+          const Text('Last Updated'),
+          Text(cheapWidget.lastUpdated),
+        ],
       ),
     );
   }
 }
 
-class NewBreadCrumbWidget extends StatefulWidget {
-  const NewBreadCrumbWidget({Key? key}) : super(key: key);
-
-  @override
-  State<NewBreadCrumbWidget> createState() => _NewBreadCrumbWidgetState();
-}
-
-class _NewBreadCrumbWidgetState extends State<NewBreadCrumbWidget> {
-  late final TextEditingController _controller;
-
-  @override
-  void initState() {
-    _controller = TextEditingController();
-    super.initState();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+class ExpensiveWidget extends StatelessWidget {
+  const ExpensiveWidget({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        centerTitle: true,
-        title: const Text('Add New Bread Crumb'),
-      ),
-      body: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 8.0,
-          vertical: 8.0,
-        ),
-        child: Column(
-          children: [
-            TextField(
-              controller: _controller,
-              decoration: const InputDecoration(
-                hintText: 'Enter a new bread crumb here',
-              ),
-            ),
-            const SizedBox(
-              height: 12.0,
-            ),
-            TextButton(
-              onPressed: () {
-                final text = _controller.text;
-                if (text.isNotEmpty) {
-                  context.read<BreadCrumbProvider>().add(
-                        BreadCrumb(
-                          isActive: false,
-                          name: text,
-                        ),
-                      );
-                  Navigator.of(context).pop();
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        ),
+    final expensiveObject = context.select<ObjectsProvider, ExpensiveObject>(
+      (provider) => provider.expensiveObject,
+    );
+    return Container(
+      height: 100,
+      color: Colors.blue.shade300,
+      child: Column(
+        children: [
+          const Text('Expensive Widget'),
+          const Text('Last Updated'),
+          Text(expensiveObject.lastUpdated),
+        ],
       ),
     );
   }
 }
 
+class ObjectProviderWidget extends StatelessWidget {
+  const ObjectProviderWidget({Key? key}) : super(key: key);
 
-// context.select() ---> is used when you want to watch a specific aspect of a provider
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<ObjectsProvider>();
+    return Container(
+      height: 100,
+      color: Colors.greenAccent.shade200,
+      child: Column(
+        children: [
+          const Text('Expensive Widget'),
+          const Text('Last Updated'),
+          Text(provider.id),
+        ],
+      ),
+    );
+  }
+}
